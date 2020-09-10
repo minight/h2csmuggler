@@ -367,8 +367,8 @@ func (w *settingsAckSwallowWriter) Flush() error {
 // isH2CUpgrade returns true if the header properly request an upgrade to h2c
 // as specified by Section 3.2.
 func isH2CUpgrade(h http.Header) bool {
-	return httpguts.HeaderValuesContainsToken(h[textproto.CanonicalMIMEHeaderKey("Upgrade")], "h2c") &&
-		httpguts.HeaderValuesContainsToken(h[textproto.CanonicalMIMEHeaderKey("Connection")], "HTTP2-Settings")
+	return httpguts.HeaderValuesContainsToken(h[textproto.CanonicalMIMEHeaderKey("Upgrade")], "h2c") // &&
+	// httpguts.HeaderValuesContainsToken(h[textproto.CanonicalMIMEHeaderKey("Connection")], "HTTP2-Settings")
 }
 
 // getH2Settings returns the []http2.Setting that are encoded in the
