@@ -38,6 +38,13 @@ def handle_response(response_headers, stream_id):
 def establish_tcp_connection(proxy_url):
     global MAX_TIMEOUT
 
+    context = ssl.create_default_context()
+    """
+    website does not support anything else so exclude all other protocols
+    """
+    #  context.options |= ssl.OP_NO_TLSv1_1 | ssl.OP_NO_TLSv1_3 | ssl.OP_NO_TLSv1_2
+    #  context.options |= ssl.OP_NO_SSLv3 | ssl.OP_NO_SSLv2
+
     port = proxy_url.port or (80 if proxy_url.scheme == "http" else 443)
     connect_args = (proxy_url.hostname, int(port))
 
@@ -45,7 +52,7 @@ def establish_tcp_connection(proxy_url):
 
     retSock = sock
     if proxy_url.scheme == "https":
-        retSock = ssl.wrap_socket(sock, ssl_version=ssl.PROTOCOL_TLS)
+        retSock = context.wrap_socket(sock, server_hostname=proxy_url.hostname)
 
     retSock.settimeout(MAX_TIMEOUT)
     retSock.connect(connect_args)
@@ -57,7 +64,7 @@ def send_initial_request(connection, proxy_url, settings):
     global UPGRADE_ONLY
     path = proxy_url.path or "/"
 
-    addl_conn_str = b", HTTP2-Settings"
+    addl_conn_str = b",HTTP2-Settings"
     if UPGRADE_ONLY:
         addl_conn_str = b""
 
@@ -71,6 +78,7 @@ def send_initial_request(connection, proxy_url, settings):
         # allowed by spec triggered errors on some faulty h2c implementatons.
         b"HTTP2-Settings: " + b"AAMAAABkAARAAAAAAAIAAAAA" + b"\r\n" +
         b"Connection: Upgrade" + addl_conn_str + b"\r\n" + b"\r\n")
+    #  b"Connection: HTTP2-Settings" + b"\r\n" + b"\r\n")
     connection.sendall(request)
 
 
