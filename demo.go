@@ -4,7 +4,7 @@ package main
 import (
 	"fmt"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
+	"github.com/minight/h2csmuggler/h2c"
 	"net/http"
 	"os"
 )
