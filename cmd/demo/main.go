@@ -3,8 +3,8 @@ package main
 
 import (
 	"fmt"
-	"golang.org/x/net/http2"
 	"github.com/minight/h2csmuggler/h2c"
+	"golang.org/x/net/http2"
 	"net/http"
 	"os"
 )
