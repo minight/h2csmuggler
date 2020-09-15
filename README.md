@@ -4,6 +4,32 @@
 ![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)
 ![Python version](https://img.shields.io/badge/python-3.x-blue.svg)
 
+## Tl;dr
+
+this repo is forked from https://github.com/BishopFox/h2csmuggler and includes the original research with modifications.
+
+this repo also implements a golang library for performing h2c smuggling. This was done via forking the net/http2 library and modifying the client to accept and process non-spec compliant h2c upgrades over tls connections. This can also handle h2c upgrades over http.
+
+Two utilities have been added to assist testing:
+
+```
+# check will return whether a h2c connection can be formed and the first request will return
+go run ./cmd/h2csmuggler check https://google.com/ http://localhost
+
+# smuggle will attempt the cli arguments as URLs sequentially
+go run ./cmd/h2csmuggler smuggle https://google.com/ https://google.com/flag
+
+# demo will create a http server that accepts non-complaint `Connection: Upgrade` connections and upgrade them to h2c for testing
+go run ./cmd/demo
+
+```
+
+**todo**
+- [ ] Add concurrency to h2csmuggler
+- [ ] ensure that concurrent "first" calls to Conn are threadsafe
+- [ ] Accept stdin/file input for check and smuggle
+
+
 ## Description
 
 h2cSmuggler smuggles HTTP traffic past insecure edge-server `proxy_pass` configurations by establishing HTTP/2 cleartext (h2c) communications with h2c-compatible back-end servers, allowing a bypass of proxy rules and access controls.
