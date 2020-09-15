@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/minight/h2csmuggler/http2"
@@ -17,24 +17,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-const CLIENT_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
-
 var (
-	NotHTTPSUrlErr      = fmt.Errorf("URL provided is not https. Cannot create h2c connection")
-	HTTP2UnsupportedErr = fmt.Errorf("Negotiated protocol does not contain h2")
-)
-
-func Request(desturl string) error {
-	parsed, err := url.Parse(desturl)
-	if err != nil {
-		return err
-	}
-
-	transport := &http2.Transport{
-		AllowHTTP: true,
-	}
-
-	dialer := &net.Dialer{
+	DefaultDialer = &net.Dialer{
 		Resolver: &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -45,91 +29,276 @@ func Request(desturl string) error {
 			},
 		},
 	}
+	DefaultTransport = &http2.Transport{
+		AllowHTTP: true,
+	}
+)
 
-	var conn net.Conn
-	if parsed.Scheme == "https" {
-		hostport := parsed.Host
-		if parsed.Port() == "" {
-			hostport = fmt.Sprintf("%s:%d", parsed.Host, 443)
+type ConnectionOption func(c *Conn)
+
+func ConnectionTransport(t *http2.Transport) ConnectionOption {
+	return func(c *Conn) {
+		c.transport = t
+	}
+}
+
+func ConnectionDialer(t *net.Dialer) ConnectionOption {
+	return func(c *Conn) {
+		c.dialer = t
+	}
+}
+
+func ConnectionMaxRetries(v int) ConnectionOption {
+	return func(c *Conn) {
+		c.maxRetries = v
+	}
+}
+
+// NewConn will return an unitialized h2csmuggler connection.
+// The first will Do will initialize the connection and perform the upgrade.
+// Target must be a parsable url including protocol e.g. https://google.com
+// path and port will be inferred if not provided (443:https and 80:http)
+// Initialization of the connection is lazily performed to allow for the caller to customise
+// the request used to upgrade the connection
+func NewConn(target string, opts ...ConnectionOption) (*Conn, error) {
+	var err error
+	var c Conn = Conn{
+		dialer:    DefaultDialer,
+		transport: DefaultTransport,
+	}
+
+	c.url, err = url.Parse(target)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, o := range opts {
+		o(&c)
+	}
+	return &c, nil
+}
+
+// Conn encapsulates all the state needed to perform a request over h2c. Internally, this is
+// a singlethreaded connection. Functions can be called concurrently, however they will block
+// on the same thread. For concurrent connections, multiple Conns should be instantiated
+// Initialization of the connection is lazily performed to allow for the caller to customise
+// the request used to upgrade the connection
+// Instantiating a Conn should be done via Client
+type Conn struct {
+	url        *url.URL
+	dialer     *net.Dialer
+	transport  *http2.Transport
+	maxRetries int
+
+	conn net.Conn
+	h2c  *http2.ClientConn
+
+	init   bool
+	initmu sync.RWMutex
+}
+
+// Initialized will return whether this connection has been initialized already
+func (c *Conn) Initialized() bool {
+	c.initmu.RLock()
+	defer c.initmu.RUnlock()
+	return c.init
+}
+
+func (c *Conn) setInitialized() {
+	log.WithField("url", c.url).Tracef("setting initialized for conn")
+	c.initmu.Lock()
+	defer c.initmu.Unlock()
+	c.init = true
+}
+
+// Close will close the underlying connections. After this is called, the struct is no
+// longer safe to use
+func (c *Conn) Close() {
+	if c.h2c != nil {
+		c.h2c.Close()
+	}
+	if c.conn != nil {
+		c.conn.Close()
+	}
+}
+
+// UpgradeOption provides manipulation of the initial upgrade request
+type UpgradeOption func(o *UpgradeOptions)
+
+var (
+	DefaultConnectionHeader    = "Upgrade, HTTP2-Settings"
+	DefaultUpgradeHeader       = "h2c"
+	DefaultHTTP2SettingsHeader = "AAMAAABkAARAAAAAAAIAAAAA"
+)
+
+// UpgradeOptions provide manual overrides for the specific headers needed to upgrade
+// the connection to h2c. Fiddling with these may result in an unsuccessful connection
+type UpgradeOptions struct {
+	ConnectionHeader    string
+	HTTP2SettingsHeader string
+	UpgradeHeader       string
+
+	ConnectionHeaderDisabled    bool
+	HTTP2SettingsHeaderDisabled bool
+	UpgradeHeaderDisabled       bool
+}
+
+func DisableHTTP2SettingsHeader(val bool) UpgradeOption {
+	return func(o *UpgradeOptions) {
+		o.HTTP2SettingsHeaderDisabled = val
+	}
+}
+
+func DisableUpgradeHeader(val bool) UpgradeOption {
+	return func(o *UpgradeOptions) {
+		o.UpgradeHeaderDisabled = val
+	}
+}
+
+func DisableConnectionHeader(val bool) UpgradeOption {
+	return func(o *UpgradeOptions) {
+		o.ConnectionHeaderDisabled = val
+	}
+}
+
+func SetHTTP2SettingsHeader(val string) UpgradeOption {
+	return func(o *UpgradeOptions) {
+		o.HTTP2SettingsHeader = val
+	}
+}
+
+func SetUpgradeHeader(val string) UpgradeOption {
+	return func(o *UpgradeOptions) {
+		o.UpgradeHeader = val
+	}
+}
+
+func SetConnectionHeader(val string) UpgradeOption {
+	return func(o *UpgradeOptions) {
+		o.ConnectionHeader = val
+	}
+}
+
+// doUpgrade will attempt to establish a TCP connection and perform the Upgrade Request
+// This will then recieve the response from the upgraded request and return it to the caller
+// This may fail due to unexpected EOF, hence retries are handled at DoUpgrade
+func (c *Conn) doUpgrade(req *http.Request) (*http.Response, error) {
+	log.Tracef("starting doUpgrade internal")
+	var err error
+	log.Tracef("establishing tcp conn")
+	if c.url.Scheme == "https" {
+		hostport := c.url.Host
+		if c.url.Port() == "" {
+			hostport = fmt.Sprintf("%s:%d", c.url.Host, 443)
 		}
 
-		tlsconn, err := tls.DialWithDialer(dialer, "tcp", hostport, &tls.Config{
+		log.Tracef("establishing tls conn on: %v", hostport)
+		tlsconn, err := tls.DialWithDialer(c.dialer, "tcp", hostport, &tls.Config{
 			InsecureSkipVerify: true,
 		})
 		if err != nil {
-			return errors.Wrap(err, "Failed to dial tls")
+			return nil, errors.Wrap(err, "Failed to dial tls")
 		}
-		conn = tlsconn
+		c.conn = tlsconn
 	} else {
-		conn, err = dialer.Dial("tcp", parsed.Host)
+		hostport := c.url.Host
+		if c.url.Port() == "" {
+			hostport = fmt.Sprintf("%s:%d", c.url.Host, 80)
+		}
+		log.Tracef("establishing tcp conn on: %v", hostport)
+		c.conn, err = c.dialer.Dial("tcp", hostport)
 		if err != nil {
-			return errors.Wrap(err, "Failed to dial tcp")
+			return nil, errors.Wrap(err, "Failed to dial tcp")
 		}
 	}
 
-	defer conn.Close()
-
-	req, err := http.NewRequest("GET", desturl, nil)
-	if err != nil {
-		return errors.Wrap(err, "Failed to create request")
-	}
-	req.Header.Add("Upgrade", "h2c")
-	req.Header.Add("HTTP2-Settings", "AAMAAABkAARAAAAAAAIAAAAA")
-	req.Header.Add("Connection", "Upgrade, HTTP2-Settings")
-
-	// We will first pull our response off the wire
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cc, res, err := transport.H2CUpgradeRequest(ctx, req, conn)
-	if err != nil {
-		return errors.Wrap(err, "Failed to create http2 conn")
-	}
-	defer cc.Close()
-
-	defer res.Body.Close()
-
-	data, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return errors.Wrap(err, "Failed to read body")
-	}
 	log.WithFields(log.Fields{
-		"path":   "/",
-		"status": res.StatusCode,
-		"proto":  res.Proto,
-		"body":   string(data),
-	}).Infof("success")
+		"headers": req.Header,
+	}).Tracef("performing upgrade request")
 
-	path := "https://h2c.foxlabs.consulting/flag"
-	req, err = http.NewRequest("GET", path, nil)
+	cc, res, err := c.transport.H2CUpgradeRequest(req, c.conn)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create new request")
+		return nil, errors.Wrap(err, "h2csmuggler: upgrade failed")
 	}
-	resp2, err := cc.RoundTrip(req)
-	if err != nil {
-		return errors.Wrap(err, "Failed to roundtrip")
-	}
-	defer resp2.Body.Close()
-
-	data, err = ioutil.ReadAll(resp2.Body)
-	if err != nil {
-		return errors.Wrap(err, "Failed to read body")
-	}
-	log.WithFields(log.Fields{
-		"path":   "/",
-		"status": resp2.StatusCode,
-		"proto":  resp2.Proto,
-		"body":   string(data),
-	}).Infof("success")
-	return nil
+	c.h2c = cc
+	c.setInitialized()
+	return res, nil
 }
 
-func StringSliceContains(vs []string, target string) bool {
-	for _, v := range vs {
-		if strings.Contains(target, v) {
-			return true
-		}
+// DoUpgrade will perform the request and upgrade the connection to http2 h2c.
+// DoUpgrade can only be successfully called once. If called a second time, this will raise an error
+// If unsuccessfully called, it can be called again, however its likely the same connection error
+// will be returned (e.g. timeout, HTTP2 not supported etc...)
+// The provided request will have the following headers added to ensure the upgrade occurs.
+// Upgrade: h2c
+// HTTP2-Settings: AAMAAABkAARAAAAAAAIAAAAA
+// Connection: Upgrade
+// These can be modified with the upgrade options however this may result in an unsuccessful connection
+// TODO: make this threadsafe.
+func (c *Conn) DoUpgrade(req *http.Request, opts ...UpgradeOption) (*http.Response, error) {
+	log.Tracef("starting upgrade")
+	if c.Initialized() {
+		return nil, errors.New("h2csmuggler: already initialized")
 	}
 
-	return false
+	o := &UpgradeOptions{
+		HTTP2SettingsHeader: DefaultHTTP2SettingsHeader,
+		ConnectionHeader:    DefaultConnectionHeader,
+		UpgradeHeader:       DefaultUpgradeHeader,
+	}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	req = req.Clone(req.Context())
+	if o.UpgradeHeaderDisabled {
+		req.Header.Del("Upgrade")
+	} else {
+		req.Header.Add("Upgrade", o.UpgradeHeader)
+	}
+
+	if o.ConnectionHeaderDisabled {
+		req.Header.Del("Connnection")
+	} else {
+		req.Header.Add("Connection", o.ConnectionHeader)
+	}
+
+	if o.HTTP2SettingsHeaderDisabled {
+		req.Header.Del("HTTP2-Settings")
+	} else {
+		req.Header.Add("HTTP2-Settings", o.HTTP2SettingsHeader)
+	}
+
+	var (
+		res *http.Response
+		err error
+	)
+
+	for i := 0; i < c.maxRetries+1; i++ {
+		log.Tracef("attempt: %d/%d", i, c.maxRetries+1)
+		res, err = c.doUpgrade(req)
+		if err == nil {
+			break
+		}
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+			log.WithError(err).Tracef("recieved error")
+			return nil, err
+		}
+		if c.conn != nil {
+			c.conn.Close()
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (c *Conn) Do(req *http.Request) (*http.Response, error) {
+	if !c.Initialized() {
+		return c.DoUpgrade(req)
+	}
+
+	return c.h2c.RoundTrip(req)
 }

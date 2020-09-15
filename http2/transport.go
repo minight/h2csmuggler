@@ -33,6 +33,7 @@ import (
 	"time"
 
 	xerrors "github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 
 	"github.com/minight/h2csmuggler/http2/hpack"
 	"golang.org/x/net/http/httpguts"
@@ -648,7 +649,7 @@ func (u UnexpectedStatusCodeError) Error() string {
 
 // H2CUpgradeRequest will perform the http2 upgrade on the connection and then retrieve the response
 // AllowHTTP must be enabled for this to work
-func (t *Transport) H2CUpgradeRequest(ctx context.Context, req *http.Request, c net.Conn) (*ClientConn, *http.Response, error) {
+func (t *Transport) H2CUpgradeRequest(req *http.Request, c net.Conn) (*ClientConn, *http.Response, error) {
 	if !t.AllowHTTP {
 		return nil, nil, errors.New("http2: allowhttp not enabled.")
 	}
@@ -667,37 +668,43 @@ func (t *Transport) H2CUpgradeRequest(ctx context.Context, req *http.Request, c 
 	if err != nil {
 		return nil, nil, xerrors.Wrap(err, "Failed to parse response")
 	}
-
-	if resp.StatusCode != 101 {
-		return nil, nil, UnexpectedStatusCodeError{Code: resp.StatusCode}
-	}
 	defer resp.Body.Close()
 
-	_, err = ioutil.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, nil, xerrors.Wrap(err, "Failed to read body")
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"status":  resp.StatusCode,
+		"body":    string(body),
+		"headers": resp.Header,
+	}).Tracef("upgrade request complete")
+
+	if resp.StatusCode != 101 {
+		logrus.Tracef("unexpected status code: %v", resp.StatusCode)
+		return nil, nil, UnexpectedStatusCodeError{Code: resp.StatusCode}
+	}
+
 	cc, err := t.newClientConn(c, req, t.disableKeepAlives())
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, xerrors.Wrap(err, "Client conn failed")
 	}
 
 	// Clean up the body as per our contract
 	_, err = io.Copy(ioutil.Discard, req.Body)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, xerrors.Wrap(err, "Body copy failed")
 	}
 	req.Body.Close()
 
-	res, err := cc.readFirstResponse(ctx)
+	res, err := cc.readFirstResponse(req)
 	if err != nil {
 		cc.Close()
-		return nil, nil, err
+		return nil, nil, xerrors.Wrap(err, "read first response failed")
 	}
 
 	res.TLS = cc.tlsState
-	res.Request = req
 
 	return cc, res, err
 }
@@ -746,11 +753,6 @@ func (t *Transport) newClientConn(c net.Conn, initialRequest *http.Request, sing
 		cs.req = initialRequest
 		cs.trace = httptrace.ContextClientTrace(initialRequest.Context())
 	}
-
-	// if t.AllowH2C {
-	//     cc.vlogf("http2: AllowH2C enabled. initializing next stream ID to 3")
-	//     cc.nextStreamID = 2
-	// }
 
 	if cs, ok := c.(connectionStater); ok {
 		state := cs.ConnectionState()
@@ -1284,7 +1286,7 @@ var ErrAlreadyRead = fmt.Errorf("First read already performed.")
 
 // readFirstResponse will read the first response from the stream. This should only be called once
 // before subsequent requests are made.
-func (cc *ClientConn) readFirstResponse(ctx context.Context) (*http.Response, error) {
+func (cc *ClientConn) readFirstResponse(req *http.Request) (*http.Response, error) {
 	if !cc.allowHTTP {
 		return nil, ErrAllowHTTPNotEnabled
 	}
@@ -1297,22 +1299,23 @@ func (cc *ClientConn) readFirstResponse(ctx context.Context) (*http.Response, er
 
 	var cs *clientStream
 	for {
-		// cc.vlogf("reading from streamid: 1")
 		cs = cc.streamByID(1, false) // we can assume the streamID is always 1 since its the first
 		if cs != nil {
-			cc.vlogf("got stream")
+			cc.vlogf("http2: got stream")
 			break
 		}
 
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
 		default:
 			continue
 		}
 	}
 	res := <-cs.resc
-
+	if res.res != nil {
+		res.res.Request = req
+	}
 	return res.res, res.err
 }
 
