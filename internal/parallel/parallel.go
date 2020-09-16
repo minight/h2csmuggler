@@ -119,7 +119,7 @@ func (c *Client) GetPathDiffOnHost(base string, targets []string, opts ...Parall
 	}
 
 	// validate our input
-	_, err := url.Parse(base)
+	baseurl, err := url.Parse(base)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse base")
 	}
@@ -129,6 +129,13 @@ func (c *Client) GetPathDiffOnHost(base string, targets []string, opts ...Parall
 			InsecureSkipVerify: true,
 		},
 	}}
+
+	// create a mutation for our HTTP2 client so it connects on the right
+	// connection. We only change the URL, since thats used to dial the conn
+	mutateBaseURL := func(r *http.Request) {
+		r.URL.Host = baseurl.Host
+	}
+	http2ClientMutations := append(o.RequestMutations, mutateBaseURL)
 
 	var wg sync.WaitGroup
 	inh2c := make(chan string, maxConns)
@@ -142,7 +149,7 @@ func (c *Client) GetPathDiffOnHost(base string, targets []string, opts ...Parall
 		go func() {
 			for t := range inhttp2 {
 				log.WithField("target", t).Tracef("requesting")
-				r, err := doConn(http2Client, t, o.RequestMutations...)
+				r, err := doConn(http2Client, t, http2ClientMutations...)
 				if err != nil {
 					log.WithField("target", t).WithError(err).Tracef("failed to request")
 					r.err = err
@@ -231,7 +238,7 @@ func (c *Client) GetPathDiffOnHost(base string, targets []string, opts ...Parall
 					break
 				}
 				tmp := r
-				r.Log("h2c")
+				// r.Log("h2c")
 				results.ShowDiffH2C(&tmp)
 			}
 		case r := <-outhttp2:
@@ -243,7 +250,7 @@ func (c *Client) GetPathDiffOnHost(base string, targets []string, opts ...Parall
 				}
 				log.Debugf("%+v", r)
 				tmp := r
-				r.Log("http2")
+				// r.Log("http2")
 				results.ShowDiffHTTP2(&tmp)
 			}
 		}

@@ -68,8 +68,8 @@ func NewDiffer(DeleteOnShow bool) *ResponseDiff {
 // ShowDiffH2C will show if there's a diff between the http2 and h2c responses.
 // if the corresponding response is not cached, this does nothing
 func (r *ResponseDiff) ShowDiffH2C(http2res *res) {
-	d, isnew := r.diffH2C(http2res)
-	if isnew {
+	d := r.diffH2C(http2res)
+	if d.H2C == nil || d.HTTP2 == nil {
 		return
 	}
 	r.diffHosts(d)
@@ -78,8 +78,8 @@ func (r *ResponseDiff) ShowDiffH2C(http2res *res) {
 // ShowDiffHTTP2 will show if there's a diff between the http2 and h2c responses.
 // if the corresponding response is not cached, this does nothing
 func (r *ResponseDiff) ShowDiffHTTP2(http2res *res) {
-	d, isnew := r.diffHTTP2(http2res)
-	if isnew {
+	d := r.diffHTTP2(http2res)
+	if d.H2C == nil || d.HTTP2 == nil {
 		return
 	}
 	r.diffHosts(d)
@@ -94,12 +94,12 @@ func (r *ResponseDiff) diffHosts(d *Diff) {
 
 	if d.HTTP2.err != d.H2C.err {
 		diff = true
-		if d.HTTP2.err != nil {
+		if d.H2C.err != nil {
 			fields["normal-status-code"] = d.HTTP2.res.StatusCode
 			fields["normal-response-body-len"] = len(d.HTTP2.body)
 			fields["h2c-error"] = d.H2C.err
 		}
-		if d.H2C.err != nil {
+		if d.HTTP2.err != nil {
 			fields["h2c-status-code"] = d.H2C.res.StatusCode
 			fields["h2c-response-body-len"] = len(d.H2C.body)
 			fields["normal-error"] = d.HTTP2.err
@@ -157,25 +157,23 @@ func (r *ResponseDiff) diffHosts(d *Diff) {
 }
 
 // DiffHTTP2 will return the diff, with the provided argument as the http2 result
-func (r *ResponseDiff) diffHTTP2(http2res *res) (d *Diff, isnew bool) {
+func (r *ResponseDiff) diffHTTP2(http2res *res) (d *Diff) {
 	diff, ok := r.cache[http2res.target]
 	if !ok {
 		r.cache[http2res.target] = &Diff{}
 		diff = r.cache[http2res.target]
-		isnew = true
 	}
 	diff.HTTP2 = http2res
-	return diff, isnew
+	return diff
 }
 
 // DiffH2C will return the diff, with the provided argument as the http2 result
-func (r *ResponseDiff) diffH2C(h2cres *res) (d *Diff, isnew bool) {
+func (r *ResponseDiff) diffH2C(h2cres *res) (d *Diff) {
 	diff, ok := r.cache[h2cres.target]
 	if !ok {
 		r.cache[h2cres.target] = &Diff{}
 		diff = r.cache[h2cres.target]
-		isnew = true
 	}
 	diff.H2C = h2cres
-	return diff, isnew
+	return diff
 }

@@ -182,6 +182,44 @@ func SetConnectionHeader(val string) UpgradeOption {
 	}
 }
 
+var (
+	ErrUnexpectedScheme = errors.New("Unexpected scheme for connection")
+)
+
+// CreateConn will create a net.Conn from the URL. This will choose between a tls
+// and a normal tcp connection based on the url scheme
+func CreateConn(t *url.URL, dialer *net.Dialer) (ret net.Conn, err error) {
+	switch t.Scheme {
+	case "https":
+		hostport := t.Host
+		if t.Port() == "" {
+			hostport = fmt.Sprintf("%s:%d", t.Host, 443)
+		}
+
+		log.Tracef("establishing tls conn on: %v", hostport)
+		tlsconn, err := tls.DialWithDialer(dialer, "tcp", hostport, &tls.Config{
+			InsecureSkipVerify: true,
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to dial tls")
+		}
+		ret = tlsconn
+	case "http":
+		hostport := t.Host
+		if t.Port() == "" {
+			hostport = fmt.Sprintf("%s:%d", t.Host, 80)
+		}
+		log.Tracef("establishing tcp conn on: %v", hostport)
+		ret, err = dialer.Dial("tcp", hostport)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to dial tcp")
+		}
+	default:
+		return nil, ErrUnexpectedScheme
+	}
+	return
+}
+
 // doUpgrade will attempt to establish a TCP connection and perform the Upgrade Request
 // This will then recieve the response from the upgraded request and return it to the caller
 // This may fail due to unexpected EOF, hence retries are handled at DoUpgrade
@@ -189,35 +227,14 @@ func (c *Conn) doUpgrade(req *http.Request) (*http.Response, error) {
 	log.Tracef("starting doUpgrade internal")
 	var err error
 	log.Tracef("establishing tcp conn")
-	if c.url.Scheme == "https" {
-		hostport := c.url.Host
-		if c.url.Port() == "" {
-			hostport = fmt.Sprintf("%s:%d", c.url.Host, 443)
-		}
-
-		log.Tracef("establishing tls conn on: %v", hostport)
-		tlsconn, err := tls.DialWithDialer(c.dialer, "tcp", hostport, &tls.Config{
-			InsecureSkipVerify: true,
-		})
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed to dial tls")
-		}
-		c.conn = tlsconn
-	} else {
-		hostport := c.url.Host
-		if c.url.Port() == "" {
-			hostport = fmt.Sprintf("%s:%d", c.url.Host, 80)
-		}
-		log.Tracef("establishing tcp conn on: %v", hostport)
-		c.conn, err = c.dialer.Dial("tcp", hostport)
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed to dial tcp")
-		}
-	}
-
 	log.WithFields(log.Fields{
 		"headers": req.Header,
 	}).Tracef("performing upgrade request")
+
+	c.conn, err = CreateConn(c.url, c.dialer)
+	if err != nil {
+		return nil, errors.Wrap(err, "h2csmuggler: connection failed")
+	}
 
 	cc, res, err := c.transport.H2CUpgradeRequest(req, c.conn)
 	if err != nil {
