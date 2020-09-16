@@ -1,13 +1,17 @@
 package cmd
 
 import (
-	"io/ioutil"
-	"net/http"
+	"bufio"
+	"os"
+	"strings"
 
-	"github.com/minight/h2csmuggler"
-	"github.com/pkg/errors"
+	"github.com/minight/h2csmuggler/internal/parallel"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+)
+
+var (
+	headers = []string{}
 )
 
 // smuggleCmd represents the smuggle command
@@ -16,64 +20,77 @@ var smuggleCmd = &cobra.Command{
 	Short: "smuggle whether a target url is vulnerable to h2c smuggling",
 	Long: `This performs a basic request against the specified host over http/1.1
 and attempts to upgrade the connection to http2. The request is then replicated
-over http2 and the results are compared`,
-	Args: cobra.MinimumNArgs(2),
+over http2 and the results are compared
+
+if '-' is the second argument, the smuggled targets will be piped in from stdin
+if infile is specified as an argument, `,
+	Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		base := args[0]
-		smuggle := args[1:]
-
-		conn, err := h2csmuggler.NewConn(base, h2csmuggler.ConnectionMaxRetries(3))
-		if err != nil {
-			log.WithError(err).Fatalf("failed to create conn")
-		}
-		defer conn.Close()
-
-		err = Request(conn, base)
-		if err != nil {
-			log.WithError(err).Fatalf("initial probe failed")
-		}
-
-		for _, t := range smuggle {
-			err := Request(conn, t)
+		lines := make([]string, 0)
+		if infile != "" {
+			log.WithField("filename", infile).Debugf("loading from infile")
+			file, err := os.Open(infile)
 			if err != nil {
-				log.WithField("target", t).WithError(err).Errorf("failed")
+				log.Fatal(err)
 			}
+			defer file.Close()
+
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				lines = append(lines, scanner.Text())
+			}
+			if err := scanner.Err(); err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			if len(args) < 2 {
+				log.Fatalf("no infile specified and no targets provided.")
+			}
+			if args[1] == "-" {
+				scanner := bufio.NewScanner(os.Stdin)
+				for scanner.Scan() {
+					line := scanner.Text()
+					lines = append(lines, line)
+				}
+			} else {
+				lines = args[1:]
+			}
+		}
+
+		c := parallel.New()
+		c.MaxConnPerHost = concurrency
+
+		hs := parseHeaders(headers)
+		opts := []parallel.ParallelOption{}
+		for _, h := range hs {
+			opts = append(opts, parallel.RequestHeader(h.key, h.value))
+		}
+
+		err := c.GetPathsOnHost(base, lines, opts...)
+		if err != nil {
+			log.WithError(err).Errorf("failed")
 		}
 	},
 }
 
-func Request(c *h2csmuggler.Conn, t string) error {
-	req, err := http.NewRequest("GET", t, nil)
-	if err != nil {
-		return errors.Wrap(err, "request creation")
-	}
+type header struct {
+	key   string
+	value string
+}
 
-	res, err := c.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "connection do")
+func parseHeaders(headers []string) (ret []header) {
+	for _, h := range headers {
+		v := strings.SplitN(h, ": ", 2)
+		if len(v) != 2 {
+			log.WithField("input", "v").Errorf("failed to parse header")
+		}
+		ret = append(ret, header{
+			key:   v[0],
+			value: v[1],
+		})
 	}
-
-	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return errors.Wrap(err, "body read")
-	}
-	if logLevelInt < 1 {
-		log.WithFields(log.Fields{
-			"status": res.StatusCode,
-			"body":   len(body),
-			"target": t,
-		}).Infof("success")
-
-	} else {
-		log.WithFields(log.Fields{
-			"status":  res.StatusCode,
-			"headers": res.Header,
-			"body":    string(body),
-			"target":  t,
-		}).Debugf("success")
-	}
-	return nil
+	return ret
 }
 
 func init() {
@@ -88,4 +105,5 @@ func init() {
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	// smuggleCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	smuggleCmd.Flags().StringSliceVarP(&headers, "header", "H", []string{}, "Headers to send in each request. These will clobber existing headers. Expected in normal formatting: e.g. `Host: foobar.com`")
 }

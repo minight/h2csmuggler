@@ -748,6 +748,9 @@ func (t *Transport) newClientConn(c net.Conn, initialRequest *http.Request, sing
 	// henc in response to SETTINGS frames?
 	cc.henc = hpack.NewEncoder(&cc.hbuf)
 
+	// Overload AllowHTTP to perform the h2c upgrade. We need to initialize
+	// the first response stream so we can fetch the response off the wire.
+	// This is very non-spec, and probably should use a separate flag.
 	if t.AllowHTTP && initialRequest != nil {
 		cs := cc.newStream()
 		cs.req = initialRequest

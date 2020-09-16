@@ -19,11 +19,12 @@ import (
 
 var (
 	DefaultDialer = &net.Dialer{
+		Timeout: time.Millisecond * time.Duration(5000),
 		Resolver: &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 				d := net.Dialer{
-					Timeout: time.Millisecond * time.Duration(10000),
+					Timeout: time.Millisecond * time.Duration(5000),
 				}
 				return d.DialContext(ctx, "udp", "1.1.1.1:53")
 			},
@@ -250,6 +251,7 @@ func (c *Conn) DoUpgrade(req *http.Request, opts ...UpgradeOption) (*http.Respon
 		opt(o)
 	}
 
+	// Clone to avoid corrupting the request after we add our headers
 	req = req.Clone(req.Context())
 	if o.UpgradeHeaderDisabled {
 		req.Header.Del("Upgrade")

@@ -1,13 +1,17 @@
 package cmd
 
 import (
-	"io/ioutil"
-	"net/http"
+	"bufio"
+	"os"
 
-	"github.com/minight/h2csmuggler"
-	"github.com/pkg/errors"
+	"github.com/minight/h2csmuggler/internal/parallel"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+)
+
+var (
+	concurrency = 5
+	infile      = ""
 )
 
 // checkCmd represents the check command
@@ -16,54 +20,51 @@ var checkCmd = &cobra.Command{
 	Short: "Check whether a target url is vulnerable to h2c smuggling",
 	Long: `This performs a basic request against the specified host over http/1.1
 and attempts to upgrade the connection to http2. The request is then replicated
-over http2 and the results are compared`,
-	Args: cobra.MinimumNArgs(1),
+over http2 and the results are compared
+
+use "-" as first argument to recieve from stdin.
+If infile is specified, then that will override CLI arguments.
+Each target will have a separate connection opened. There is no optimization for batching paths to same host:port combinations`,
+	Args: cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
-		for _, t := range args {
-			err := ConnectAndRequest(t)
+		lines := make([]string, 0)
+		if infile != "" {
+			log.WithField("filename", infile).Debugf("loading from infile")
+			file, err := os.Open(infile)
 			if err != nil {
-				log.WithField("target", t).WithError(err).Errorf("failed")
+				log.Fatal(err)
+			}
+			defer file.Close()
+
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				lines = append(lines, scanner.Text())
+			}
+			if err := scanner.Err(); err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			if len(args) == 0 {
+				log.Fatalf("no infile specified and no arguments provided.")
+			}
+			if args[0] == "-" {
+				scanner := bufio.NewScanner(os.Stdin)
+				for scanner.Scan() {
+					line := scanner.Text()
+					lines = append(lines, line)
+				}
+			} else {
+				lines = args
 			}
 		}
+
+		c := parallel.New()
+		c.MaxParallelHosts = concurrency
+		err := c.GetParallelHosts(lines)
+		if err != nil {
+			log.WithError(err).Errorf("failed")
+		}
 	},
-}
-
-func ConnectAndRequest(t string) error {
-	conn, err := h2csmuggler.NewConn(t, h2csmuggler.ConnectionMaxRetries(3))
-	if err != nil {
-		return errors.Wrap(err, "connect")
-	}
-	defer conn.Close()
-
-	req, err := http.NewRequest("GET", t, nil)
-	if err != nil {
-		return errors.Wrap(err, "request creation")
-	}
-
-	res, err := conn.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "connection do")
-	}
-
-	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return errors.Wrap(err, "body read")
-	}
-
-	log.WithFields(log.Fields{
-		"status": res.StatusCode,
-		"body":   len(body),
-		"target": t,
-	}).Infof("success")
-
-	log.WithFields(log.Fields{
-		"status":  res.StatusCode,
-		"headers": res.Header,
-		"body":    string(body),
-		"target":  t,
-	}).Debugf("verbose")
-	return nil
 }
 
 func init() {
@@ -77,5 +78,7 @@ func init() {
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
-	// checkCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	checkCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 10, "Number of concurrent threads to use")
+	checkCmd.Flags().StringVarP(&infile, "infile", "i", "", "input file to read from")
+
 }
