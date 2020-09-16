@@ -12,6 +12,8 @@ import (
 
 var (
 	headers = []string{}
+	method  = "GET"
+	compare = false
 )
 
 // smuggleCmd represents the smuggle command
@@ -66,8 +68,14 @@ if infile is specified as an argument, `,
 		for _, h := range hs {
 			opts = append(opts, parallel.RequestHeader(h.key, h.value))
 		}
+		opts = append(opts, parallel.RequestMethod(method))
 
-		err := c.GetPathsOnHost(base, lines, opts...)
+		var err error
+		if !compare {
+			err = c.GetPathsOnHost(base, lines, opts...)
+		} else {
+			err = c.GetPathDiffOnHost(base, lines, opts...)
+		}
 		if err != nil {
 			log.WithError(err).Errorf("failed")
 		}
@@ -104,6 +112,7 @@ func init() {
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
-	// smuggleCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	smuggleCmd.Flags().BoolVarP(&compare, "compare", "C", false, "Compare the results from h2c with a basic http2 request. log any differences")
 	smuggleCmd.Flags().StringSliceVarP(&headers, "header", "H", []string{}, "Headers to send in each request. These will clobber existing headers. Expected in normal formatting: e.g. `Host: foobar.com`")
+	smuggleCmd.Flags().StringVarP(&method, "method", "X", "GET", "Method to send in the smuggled request. This will affect the initial request as well")
 }

@@ -30,7 +30,6 @@ $ cat ~/tools/lists/rafter.txt | head -n 10 | ./h2cs mutate pitchfork http://loc
 {"body":34,"level":"info","msg":"success","status":200,"target":"http://localhost/api/csrf-token","time":"2020-09-16T12:43:05+10:00"}
 {"body":27,"level":"info","msg":"success","status":200,"target":"http://localhost/cgi-bin","time":"2020-09-16T12:43:05+10:00"}
 <snip>
-
 ```
 
 **todo**

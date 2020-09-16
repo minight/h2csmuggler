@@ -1102,6 +1102,11 @@ func actualContentLength(req *http.Request) int64 {
 }
 
 func (cc *ClientConn) RoundTrip(req *http.Request) (*http.Response, error) {
+	logrus.WithFields(logrus.Fields{
+		"url":     req.URL.String(),
+		"method":  req.Method,
+		"headers": req.Header,
+	}).Tracef("sending")
 	resp, _, err := cc.roundTrip(req)
 	return resp, err
 }

@@ -1,12 +1,13 @@
-// Lightly modified example from: https://github.com/thrawn01/h2c-golang-example
 package main
 
 import (
 	"fmt"
-	"github.com/minight/h2csmuggler/h2c"
-	"golang.org/x/net/http2"
 	"net/http"
 	"os"
+
+	"github.com/minight/h2csmuggler/h2c"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/http2"
 )
 
 func checkErr(err error, msg string) {
@@ -28,10 +29,22 @@ func H2CServerUpgrade() {
 
 	handler := http.NewServeMux()
 	handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.WithFields(log.Fields{
+			"headers": r.Header,
+			"path":    r.URL.String(),
+			"method":  r.Method,
+			"host":    r.Host,
+		}).Infof("recieved")
 		fmt.Fprintf(w, "Hello, %v, http: %v", r.URL.Path, r.TLS == nil)
 	})
 
 	handler.HandleFunc("/flag", func(w http.ResponseWriter, r *http.Request) {
+		log.WithFields(log.Fields{
+			"headers": r.Header,
+			"path":    r.URL.String(),
+			"method":  r.Method,
+			"host":    r.Host,
+		}).Infof("recieved")
 		fmt.Fprintf(w, "You got the flag!")
 	})
 

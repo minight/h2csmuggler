@@ -110,6 +110,8 @@ func (c *Conn) setInitialized() {
 	c.initmu.Lock()
 	defer c.initmu.Unlock()
 	c.init = true
+	log.WithField("url", c.url).Tracef("initilzied set")
+
 }
 
 // Close will close the underlying connections. After this is called, the struct is no
