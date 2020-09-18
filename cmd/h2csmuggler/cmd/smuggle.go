@@ -115,4 +115,5 @@ func init() {
 	smuggleCmd.Flags().BoolVarP(&compare, "compare", "C", false, "Compare the results from h2c with a basic http2 request. log any differences")
 	smuggleCmd.Flags().StringSliceVarP(&headers, "header", "H", []string{}, "Headers to send in each request. These will clobber existing headers. Expected in normal formatting: e.g. `Host: foobar.com`")
 	smuggleCmd.Flags().StringVarP(&method, "method", "X", "GET", "Method to send in the smuggled request. This will affect the initial request as well")
+	smuggleCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 10, "Number of concurrent threads to use")
 }

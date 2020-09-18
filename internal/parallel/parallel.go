@@ -124,7 +124,7 @@ func (c *Client) GetPathDiffOnHost(base string, targets []string, opts ...Parall
 		return errors.Wrap(err, "failed to parse base")
 	}
 
-	http2Client := &http.Client{Transport: &http2.Transport{
+	http2Client := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
 		},
@@ -232,7 +232,6 @@ func (c *Client) GetPathDiffOnHost(base string, targets []string, opts ...Parall
 		select {
 		case r := <-outh2c:
 			{
-				log.Debugf("got rh2c : %+v", r)
 				if r.IsNil() {
 					h2cClosed = true
 					break
@@ -243,12 +242,10 @@ func (c *Client) GetPathDiffOnHost(base string, targets []string, opts ...Parall
 			}
 		case r := <-outhttp2:
 			{
-				log.Debugf("got r http2: %+v", r)
 				if r.IsNil() {
 					http2Closed = true
 					break
 				}
-				log.Debugf("%+v", r)
 				tmp := r
 				// r.Log("http2")
 				results.ShowDiffHTTP2(&tmp)

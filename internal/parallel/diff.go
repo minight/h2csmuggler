@@ -40,11 +40,12 @@ func (r *res) Log(source string) {
 		}
 	} else {
 		log.WithFields(log.Fields{
-			"status": r.res.StatusCode,
-			"body":   len(r.body),
-			"target": r.target,
-			"source": source,
-		}).Infof("success")
+			"status":  r.res.StatusCode,
+			"headers": r.res.Header,
+			"body":    len(r.body),
+			"target":  r.target,
+			"source":  source,
+		}).Debugf("success")
 	}
 }
 
@@ -114,8 +115,10 @@ func (r *ResponseDiff) diffHosts(d *Diff) {
 
 		if len(d.HTTP2.res.Header) != len(d.H2C.res.Header) {
 			diff = true
+			sharedHeaders := http.Header{}
 			http2Headers := http.Header{}
 			h2cHeaders := http.Header{}
+			seen := map[string]struct{}{}
 			for k, v := range d.HTTP2.res.Header {
 				h2cv := d.H2C.res.Header.Values(k)
 				if len(v) != len(h2cv) {
@@ -125,9 +128,26 @@ func (r *ResponseDiff) diffHosts(d *Diff) {
 					for _, vv := range h2cv {
 						h2cHeaders.Add(k, vv)
 					}
+				} else {
+					for _, vv := range v {
+						sharedHeaders.Add(k, vv)
+					}
+				}
+				seen[k] = struct{}{}
+			}
+
+			for k, v := range d.H2C.res.Header {
+				_, ok := seen[k]
+				if ok {
+					continue
+				}
+
+				for _, vv := range v {
+					h2cHeaders.Add(k, vv)
 				}
 			}
 			fields["normal-headers"] = http2Headers
+			fields["same-headers"] = sharedHeaders
 			fields["h2c-headers"] = h2cHeaders
 		}
 
@@ -138,8 +158,8 @@ func (r *ResponseDiff) diffHosts(d *Diff) {
 		}
 
 		if bytes.Compare(d.HTTP2.body, d.H2C.body) != 0 {
-			debugFields["normal-body"] = d.HTTP2.body
-			debugFields["h2c-body"] = d.H2C.body
+			debugFields["normal-body"] = string(d.HTTP2.body)
+			debugFields["h2c-body"] = string(d.H2C.body)
 		}
 	}
 	if diff {
