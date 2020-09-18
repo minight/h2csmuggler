@@ -45,7 +45,7 @@ func (r *res) Log(source string) {
 			"body":    len(r.body),
 			"target":  r.target,
 			"source":  source,
-		}).Debugf("success")
+		}).Infof("success")
 	}
 }
 
@@ -93,20 +93,24 @@ func (r *ResponseDiff) diffHosts(d *Diff) {
 	fields := log.Fields{}
 	debugFields := log.Fields{}
 
+
 	if d.HTTP2.err != d.H2C.err {
 		diff = true
 		if d.H2C.err != nil {
 			fields["normal-status-code"] = d.HTTP2.res.StatusCode
 			fields["normal-response-body-len"] = len(d.HTTP2.body)
+			fields["host"] = d.HTTP2.res.Request.Host
 			fields["h2c-error"] = d.H2C.err
 		}
 		if d.HTTP2.err != nil {
 			fields["h2c-status-code"] = d.H2C.res.StatusCode
 			fields["h2c-response-body-len"] = len(d.H2C.body)
+			fields["host"] = d.H2C.res.Request.Host
 			fields["normal-error"] = d.HTTP2.err
 		}
 	}
 	if d.HTTP2.res != nil && d.H2C.res != nil {
+		fields["host"] = d.H2C.res.Request.Host
 		if d.HTTP2.res.StatusCode != d.H2C.res.StatusCode {
 			diff = true
 			fields["normal-status-code"] = d.HTTP2.res.StatusCode
