@@ -81,7 +81,11 @@ type ParallelOptions struct {
 func RequestHeader(key string, value string) ParallelOption {
 	return func(o *ParallelOptions) {
 		mut := func(r *http.Request) {
-			r.Header.Add(key, value)
+			if key == "Host" {
+				r.Host = value
+			} else {
+				r.Header.Add(key, value)
+			}
 		}
 		o.RequestMutations = append(o.RequestMutations, mut)
 	}
