@@ -49,6 +49,7 @@ def establish_tcp_connection(proxy_url):
     global MAX_TIMEOUT
 
     context = ssl.create_default_context()
+    context.check_hostname = False
     """
     website does not support anything else so exclude all other protocols
     """
