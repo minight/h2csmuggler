@@ -35,7 +35,7 @@ func H2CServerUpgrade() {
 			"method":  r.Method,
 			"host":    r.Host,
 		}).Infof("recieved")
-		fmt.Fprintf(w, "Hello, %v, http: %v", r.URL.Path, r.TLS == nil)
+		fmt.Fprintf(w, "Hello, %v, %v,  http: %v", r.URL.Path, r.URL.RawQuery, r.TLS == nil)
 	})
 
 	handler.HandleFunc("/flag", func(w http.ResponseWriter, r *http.Request) {
