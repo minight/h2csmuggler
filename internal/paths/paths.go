@@ -26,6 +26,9 @@ func Pitchfork(base string, paths []string) (ret []string, err error) {
 // an empty slice will be returned
 func Prefix(prefix []string, paths []string) (ret []string) {
 	for _, pre := range prefix {
+		if len(pre) == 0 {
+			continue
+		}
 		for _, p := range paths {
 			ret = append(ret, fmt.Sprintf("%s/%s", pre, p))
 		}
