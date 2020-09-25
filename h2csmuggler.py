@@ -24,11 +24,11 @@ def handle_events(events, request, isVerbose):
             for n, v in event.headers:
                 if n == b":status":
                     status_code = v.decode('utf-8')
-            #  handle_response(event.headers, event.stream_id)
+            handle_response(event.headers, event.stream_id)
         elif isinstance(event, DataReceived):
             response_length += len(event.data.decode("utf-8", 'replace'))
-            #  print(event.data.decode('utf-8', 'replace'))
-            #  print("")
+            print(event.data.decode('utf-8', 'replace'))
+            print("")
         elif isinstance(event, StreamReset):
             raise RuntimeError("stream reset: %d" % event.error_code)
         else:
@@ -221,7 +221,7 @@ def main(args):
     # This must send the http pri request that establishes http2
     # also appears to send the initial get request again
     d = h2_connection.data_to_send()
-    print("data to send ", d)
+    #  print("data to send ", d)
     connection.sendall(d)
 
     # Step 6: Feed the body data to the connection.
@@ -237,7 +237,7 @@ def main(args):
 
     # This is an ack
     d = h2_connection.data_to_send()
-    print("data to send", d)
+    #  print("data to send", d)
 
     connection.sendall(d)
 
@@ -269,7 +269,7 @@ def main(args):
                 smuggled_request_headers.append(tuple(header.split(": ")))
 
         # Send request
-        #  print("[INFO] Requesting - " + path)
+        print("[INFO] Requesting - " + path)
         sendSmuggledRequest(h2_connection, connection,
                             smuggled_request_headers, args)
 

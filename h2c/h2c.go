@@ -16,13 +16,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/textproto"
 	"os"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
@@ -162,6 +162,13 @@ func h2cUpgrade(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 	if !isH2CUpgrade(r.Header) {
 		return nil, errors.New("non-conforming h2c headers")
 	}
+
+	log.WithFields(log.Fields{
+		"headers": r.Header,
+		"method":  r.Method,
+		"url":     r.RequestURI,
+		"host":    r.Host,
+	}).Infof("upgrading request")
 
 	// Initial bytes we put into conn to fool http2 server
 	initBytes, _, err := convertH1ReqToH2(r)
